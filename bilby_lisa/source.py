@@ -1,6 +1,6 @@
 # Licensed under an MIT style license -- see LICENSE.md
 
-from bbhx.utils.transform import LISA_to_SSB
+
 from bilby.core import utils
 from few.waveform import GenerateEMRIWaveform
 import numpy as np
@@ -86,6 +86,7 @@ def lisa_binary_black_hole(
         - pn_phase_order
         - pn_amplitude_order
     """
+    from bbhx.utils.transform import LISA_to_SSB
     _implemented_channels = ["LISA_A", "LISA_E", "LISA_T"]
     waveform_kwargs = dict(
         reference_frequency=0.0, minimum_frequency=1e-4,
@@ -388,7 +389,7 @@ def create_response_generic(generator, Tobs, dt, use_gpu=False, tdi_kwargs=None)
     from fastlisaresponse import ResponseWrapper
 
     if tdi_kwargs is None:
-        orbit_file = "../orbits/esa-trailing-orbits.h5"
+        orbit_file = "/Users/jthompson/git/lisa-tools/orbits/esa-trailing-orbits.h5"
         orbit_kwargs = dict(orbit_file=orbit_file)
 
         tdi_gen = "1st generation"
@@ -422,7 +423,7 @@ def create_response_generic(generator, Tobs, dt, use_gpu=False, tdi_kwargs=None)
     return response
 
 def lisa_emri(
-    M, mu, e0, p0, theta0, phi0, psi, dist, T, dt, eps, **kwargs
+    time_array, M_primary, mu, e0, p0, theta0, phi0, psi, dist, lam, beta, T, dt, eps, **kwargs
 ):
     """
 
@@ -430,6 +431,8 @@ def lisa_emri(
     ----------
 
     """
+
+    _implemented_channels = ["LISA_A", "LISA_E", "LISA_T"]
     waveform_kwargs = dict(
         reference_frequency=0.0, minimum_frequency=1e-4,
         maximum_frequency=1.0 / (dt * 2.0), catch_waveform_errors=False,
@@ -437,6 +440,7 @@ def lisa_emri(
         t_obs_end=0.0, reference_frame='SSB',
         waveform_approximant="FastEMRIWaveform", relative=False,
     )
+    waveform_kwargs.update(kwargs)
 
     model_generator = EMRIWave(use_gpu=False)
 
@@ -448,14 +452,12 @@ def lisa_emri(
         )
 
     emri_injection_params = [
-        M, mu, p0, e0, theta0, phi0, psi, dist
+        M_primary, mu, p0, e0, theta0, phi0, psi, dist, lam, beta
     ]
 
     emri_kwargs = {
-        "eps": 1e-5
+        "eps": eps
     }
-
-    _implemented_channels = ["LISA_A", "LISA_E", "LISA_T"]
 
     _channels_to_calculate = [
         _ for _ in waveform_kwargs["ifos"] if _ in _implemented_channels
@@ -474,19 +476,20 @@ def lisa_emri(
             f"{_base_error}. Only calculating waveforms for "
             f"{', '.join(_channels_to_calculate)}"
         )
-    if waveform_kwargs["reference_frame"].lower() == "lisa":
-        geocent_time, ra, dec, psi = LISA_to_SSB(geocent_time, ra, dec, psi)
-    elif waveform_kwargs["reference_frame"].lower() == "ssb":
-        pass
-    else:
-        raise ValueError(
-            f"Unknown reference frame: {waveform_kwargs['reference_frame']}"
-        )
+    # if waveform_kwargs["reference_frame"].lower() == "lisa":
+    #     geocent_time, ra, dec, psi = LISA_to_SSB(geocent_time, ra, dec, psi)
+    # elif waveform_kwargs["reference_frame"].lower() == "ssb":
+    #     pass
+    # else:
+    #     raise ValueError(
+    #         f"Unknown reference frame: {waveform_kwargs['reference_frame']}"
+    #     )
 
     try:
         if "emri" in waveform_kwargs["waveform_approximant"].lower():
             # get FD waveform
             out = signal_generator(*emri_injection_params,**emri_kwargs)
+            out = np.array(out)
         else:
             raise ValueError(
                 f"Waveform approximant: "
@@ -500,6 +503,7 @@ def lisa_emri(
         # out[2] *= frequency_bounds
         _waveform_dict = {"LISA_A": out[0], "LISA_E": out[1], "LISA_T": out[2]}
     except Exception as e:
+        raise e
         if waveform_kwargs["catch_waveform_errors"]:
             # failed_parameters = dict(
             #     mass_1=mass_1, mass_2=mass_2, chi_1=chi_1, chi_2=chi_2,
@@ -508,12 +512,13 @@ def lisa_emri(
             #     geocent_time=geocent_time,
             #     approximant=waveform_kwargs["waveform_approximant"]
             # )
-            utils.logger.warning(
-                "Evaluating the waveform failed with error: {}\n".format(e) +
-                "The parameters were {}\n".format(failed_parameters) +
-                "Likelihood will be set to -inf."
-            )
-            _waveform_dict = {}
+            print(e)
+            # utils.logger.warning(
+            #     "Evaluating the waveform failed with error: {}\n".format(e) +
+            #     "The parameters were {}\n".format(failed_parameters) +
+            #     "Likelihood will be set to -inf."
+            # )
+            # _waveform_dict = {}
     _waveform_dict = LISAPolarizationDict(
         {key: _waveform_dict.get(key, None) for key in _channels_to_calculate}
     )
